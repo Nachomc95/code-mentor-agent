@@ -1,0 +1,15 @@
+﻿# Ignorar carpetas de Visual Studio
+.vs/
+
+# Copia de seguridad (no subir)
+apps/web_backup/
+
+# Dependencias y caché de Next.js
+node_modules/
+.next/
+.env
+*.log
+
+# Archivos de sistema
+Desktop.ini
+Thumbs.db
