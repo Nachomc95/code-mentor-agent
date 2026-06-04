@@ -1,6 +1,6 @@
 ﻿import { auth } from '@clerk/nextjs/server';
-import { db } from '../../server/trpc/db'; // Ajusta si tu db.ts está en otro lugar
-import { AnalysisCard } from '../../components/AnalysisCard';
+import { db } from '../server/trpc/db';        // sube un nivel a app/, luego server/trpc/db
+import { AnalysisCard } from '../components/AnalysisCard'; // sube un nivel a app/, luego components/
 
 export default async function HistoryPage() {
     const { userId } = await auth();
