@@ -1,24 +1,36 @@
 ﻿import { protectedProcedure, router } from "../trpc";
 import { z } from "zod";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { db } from "../db";
 
-const model = new ChatGoogleGenerativeAI({
-    apiKey: process.env.GOOGLE_API_KEY,
-    temperature: 0.7,
-    model: "gemini-2.5-flash",
-});
+// No creamos el modelo aquí arriba, lo haremos dentro de la función
 
 const analyzeCodeSchema = z.object({
     code: z.string().min(1, "El código es requerido"),
     language: z.string().optional().default("javascript"),
 });
 
+// Función auxiliar para obtener el modelo (lazy)
+let model: ChatGoogleGenerativeAI | null = null;
+function getModel() {
+    if (!model) {
+        if (!process.env.GOOGLE_API_KEY) {
+            throw new Error("Falta la variable de entorno GOOGLE_API_KEY");
+        }
+        model = new ChatGoogleGenerativeAI({
+            apiKey: process.env.GOOGLE_API_KEY,
+            temperature: 0.7,
+            model: "gemini-2.5-flash",
+        });
+    }
+    return model;
+}
+
 export const analysisRouter = router({
     analyzeCode: protectedProcedure
         .input(analyzeCodeSchema)
-        .mutation(async ({ ctx, input }) => {
+        .mutation(async ({ input }) => {
             const { code, language } = input;
+
             const prompt = `
 Eres un experto en revisión de código. Analiza el siguiente código en ${language} y proporciona:
 - Posibles errores o bugs.
@@ -28,69 +40,31 @@ Eres un experto en revisión de código. Analiza el siguiente código en ${langu
 Código:
 ${code}
 
-Devuelve la respuesta ÚNICAMENTE en formato JSON, sin ningún texto adicional fuera del JSON. El JSON debe tener exactamente las claves: "errors", "suggestions", "summary".
+Devuelve la respuesta ÚNICAMENTE en formato JSON con las claves: "errors", "suggestions", "summary".
 `;
 
+            const model = getModel();
+            const response = await model.invoke(prompt);
+            const content = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+
             try {
-                const response = await model.invoke(prompt);
-                const content = typeof response.content === "string"
-                    ? response.content
-                    : JSON.stringify(response.content);
-
-                let parsedResult;
-                try {
-                    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/);
-                    if (jsonMatch && jsonMatch[1]) {
-                        parsedResult = JSON.parse(jsonMatch[1]);
-                    } else {
-                        parsedResult = JSON.parse(content);
-                    }
-                } catch {
-                    parsedResult = { errors: [], suggestions: [], summary: content };
+                const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/);
+                if (jsonMatch && jsonMatch[1]) {
+                    return JSON.parse(jsonMatch[1]);
                 }
-
-                // --- Guardar en base de datos con comprobación de userId ---
-                if (ctx.userId) {
-                    try {
-                        const user = await db.user.findUnique({
-                            where: { clerkId: ctx.userId }
-                        });
-                        if (user) {
-                            await db.analysis.create({
-                                data: {
-                                    userId: user.id,
-                                    codeSnippet: code,
-                                    result: parsedResult,
-                                    status: "completed",
-                                },
-                            });
-                        } else {
-                            console.error("No se encontró usuario en BD para clerkId:", ctx.userId);
-                        }
-                    } catch (dbError) {
-                        console.error("Error guardando análisis en BD:", dbError);
-                    }
-                } else {
-                    console.error("No userId en contexto");
-                }
-                // ---------------------------------------------------------
-
-                return parsedResult;
-            } catch (error) {
-                console.error("Error al invocar Gemini:", error);
-                throw new Error(`Error al analizar el código con IA: ${error instanceof Error ? error.message : String(error)}`);
+                return JSON.parse(content);
+            } catch {
+                return { errors: [], suggestions: [], summary: content };
             }
         }),
 
     getHistory: protectedProcedure.query(async ({ ctx }) => {
-        // Si no hay userId, devolver array vacío
         if (!ctx.userId) return [];
-
+        const { db } = await import("../db");
         const user = await db.user.findUnique({
             where: { clerkId: ctx.userId }
         });
         if (!user) return [];
-
         return db.analysis.findMany({
             where: { userId: user.id },
             orderBy: { createdAt: 'desc' },
