@@ -10,7 +10,7 @@ export function Navbar() {
 
     const navItems = [
         { href: "/dashboard", label: "Dashboard" },
-        { href: "/history", label: "Historial" },
+        { href: "/dashboard/history", label: "Historial" },
     ];
 
     return (
